@@ -16,8 +16,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:src="@drawable/ic_recrod"
-
-            android:text="Comenzar" />
+            android:contentDescription="@string/record_button"/>
 
         <TextView
             android:id="@+id/tvDecibel"
@@ -27,17 +26,5 @@
             android:layout_gravity="center_horizontal"
             tools:text="Decibels..."/>
 
-
-        <Switch
-            android:id="@+id/switch1"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-
-            android:text="Share on IoT platform" />
-
-
     </LinearLayout>
-
-
 </RelativeLayout>
