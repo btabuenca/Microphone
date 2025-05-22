@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.util.Log;
 import android.widget.ImageButton;
 import android.widget.TextView;
 
@@ -16,6 +17,9 @@ import androidx.core.content.ContextCompat;
 import android.Manifest;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
+import java.io.File;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Timer;
@@ -28,13 +32,14 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView decibelTextView;
     private ImageButton recordButton;
-
+    private File outputFile;
 
     private Timer timer;
     private Handler handler;
 
     private static final int DECIBEL_CALIBRATION_ADJUSTMENT = 63;
-    private static final int MEASUREMENT_PERIOD = 100; // 1000 measures every second
+    //private static final int MEASUREMENT_PERIOD = 100; // Se lee cada 100 milisegundos. 10 veces por segundo
+    private static final int MEASUREMENT_PERIOD = 1000; // Se lee cada 100 milisegundos. 1 vez por segundo
     private static final int REQUEST_MICROPHONE = 200;
 
     @Override
@@ -57,7 +62,7 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 if (isRecording) {
                     stopRecording();
-                    recordButton.setImageResource(R.drawable.ic_recrod);
+                    recordButton.setImageResource(R.drawable.ic_rec);
                 } else {
                     startRecording();
                     recordButton.setImageResource(R.drawable.ic_stop);
@@ -92,25 +97,39 @@ public class MainActivity extends AppCompatActivity {
         mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
 
         try {
-            mediaRecorder.setOutputFile("/dev/null");
+            outputFile = new File(getCacheDir(), "temp_audio.3gp");
+            mediaRecorder.setOutputFile(outputFile.getAbsolutePath());
+
             mediaRecorder.prepare();
             mediaRecorder.start();
             isRecording = true;
             startTimer();
         } catch (IOException e) {
             e.printStackTrace();
+            Toast.makeText(this, "Error al iniciar grabación", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void stopRecording() {
         if (isRecording) {
-            mediaRecorder.stop();
+            try {
+                mediaRecorder.stop();
+            } catch (RuntimeException e) {
+                // Si no se llegó a iniciar correctamente
+                e.printStackTrace();
+            }
             mediaRecorder.release();
             mediaRecorder = null;
             isRecording = false;
             stopTimer();
+
+            // Borrar archivo temporal
+            if (outputFile != null && outputFile.exists()) {
+                outputFile.delete();
+            }
         }
     }
+
 
     private void startTimer() {
         timer = new Timer();
@@ -132,26 +151,53 @@ public class MainActivity extends AppCompatActivity {
     private void updateDecibelLevel() {
         if (mediaRecorder != null) {
             int amplitude = mediaRecorder.getMaxAmplitude();
-            final double decibels = 20 * Math.log10(amplitude / 2700.0);
 
-            handler.post(new Runnable() {
-                @Override
-                public void run() {
-                    String decibelText = String.format(Locale.getDefault(), "%.1f dB", decibels + DECIBEL_CALIBRATION_ADJUSTMENT);
 
-                    decibelTextView.setText(decibelText);
-                    int iThreshold = (int) (decibels + DECIBEL_CALIBRATION_ADJUSTMENT);
-                    if (iThreshold > 100) {
-                        decibelTextView.setTextColor(Color.RED);
-                    } else if (iThreshold > 75) {
-                        decibelTextView.setTextColor(Color.YELLOW);
-                    } else if (iThreshold > 50) {
-                        decibelTextView.setTextColor(Color.GREEN);
-                    } else {
-                        decibelTextView.setTextColor(Color.BLUE);
-                    }
-                }
-            });
+            final double decibels;
+            if (amplitude > 0) {
+                decibels = 20 * Math.log10(amplitude / 2700.0);
+                if (!Double.isFinite(decibels)) return;
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            String decibelText = String.format(Locale.getDefault(), "%.1f dB", decibels + DECIBEL_CALIBRATION_ADJUSTMENT);
+
+                            decibelTextView.setText(decibelText);
+                            int iThreshold = (int) (decibels + DECIBEL_CALIBRATION_ADJUSTMENT);
+                            if (iThreshold > 100) {
+                                decibelTextView.setTextColor(Color.RED);
+                            } else if (iThreshold > 75) {
+                                decibelTextView.setTextColor(Color.YELLOW);
+                            } else if (iThreshold > 50) {
+                                decibelTextView.setTextColor(Color.GREEN);
+                            } else {
+                                decibelTextView.setTextColor(Color.BLUE);
+                            }
+
+                            sendDecibelTelemetry(decibels + DECIBEL_CALIBRATION_ADJUSTMENT);
+                        }
+                    });
+            }
+        }
+    }
+
+    // Add this method to MainActivity
+    private void sendDecibelTelemetry(double decibels) {
+        ConfigReader configReader = new ConfigReader(this);
+        String url = configReader.getProperty("url");
+        Log.e("telemetry", "Enviando: " + decibels);
+        Log.e("telemetry", "URL: " + url);
+
+        if (url != null) {
+            try {
+                JSONObject json = new JSONObject();
+                json.put("decibels", decibels);
+                Log.e("telemetry", "Payload: " + json.toString());
+                // Send in a background thread
+                new Thread(() -> NetworkUtils.sendTelemetryData(json, url)).start();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
